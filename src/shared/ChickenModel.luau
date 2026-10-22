@@ -169,6 +169,30 @@ function accessories.stars(model: Model)
 	end
 end
 
+-- Ett ägg med prickar, som kläcks i cutscenen. Prickarna har attributet "Spot".
+function ChickenModel.buildEgg(): Model
+	local model = Instance.new("Model")
+	model.Name = "Ägg"
+	model.PrimaryPart = sphere(model, Vector3.new(2.2, 2.9, 2.2), CFrame.new(0, 1.45, 0), Color3.fromRGB(255, 250, 235))
+	local rng = Random.new()
+	for _ = 1, 9 do
+		local theta = math.rad(-90 + rng:NextNumber(-75, 75))
+		local phi = math.rad(rng:NextNumber(35, 145))
+		local normal = Vector3.new(math.sin(phi) * math.cos(theta), math.cos(phi), math.sin(phi) * math.sin(theta))
+		local position = Vector3.new(normal.X * 1.07, 1.45 + normal.Y * 1.42, normal.Z * 1.07)
+		local size = rng:NextNumber(0.3, 0.55)
+		local spot = sphere(
+			model,
+			Vector3.new(size, size, 0.15),
+			CFrame.lookAt(position, position + normal),
+			Color3.fromRGB(220, 215, 200)
+		)
+		spot:SetAttribute("Spot", true)
+	end
+	model.WorldPivot = CFrame.new()
+	return model
+end
+
 function ChickenModel.build(chicken: Chickens.Chicken): Model
 	local model = Instance.new("Model")
 	model.Name = chicken.name

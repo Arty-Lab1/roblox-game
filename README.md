@@ -28,8 +28,11 @@ Tryck på tärningen för att rulla fram en kyckling. Varje kyckling har egna od
 
 - Kycklingarna och deras odds finns i `src/shared/Chickens.luau`. Lägg till en rad där för en ny kyckling.
 - Utseendet (hattar, kronor, glorior …) byggs i `src/shared/ChickenModel.luau`.
-- Var 10:e rullning är en tur-rullning med dubbel chans.
+- Varje rullning kostar mynt. Kycklingarna hamnar i inventoryt, där man kan sälja dem eller utrusta en som följer efter en.
+- Kycklingar som är 1 på 10 eller ovanligare får en cutscene (`src/client/Cutscene.luau`).
+- Var 10:e rullning är en tur-rullning med dubbel chans, och en tur-dryck ger dubbel tur en stund.
 - Ovanliga kycklingar (1 på 1000 eller mer) visas för alla på servern.
+- Priser och odds-gränser ändrar du i `src/shared/Config.luau`.
 
 Ändringar i `src/` syns direkt i Studio. Gör ändringar i filerna här, inte i Studio, annars skrivs de över.
 

@@ -1,4 +1,4 @@
--- Allt spelaren ser: tärningsknappen, kycklingen som rullas fram och samlingen.
+-- Allt spelaren ser: mynt, tärningen, kycklingen som rullas fram och inventoryt.
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -6,158 +6,159 @@ local TweenService = game:GetService("TweenService")
 
 local Chickens = require(ReplicatedStorage.Shared.Chickens)
 local ChickenModel = require(ReplicatedStorage.Shared.ChickenModel)
+local Config = require(ReplicatedStorage.Shared.Config)
+local Cutscene = require(script.Cutscene)
+local Dice = require(script.Dice)
+local Effects = require(script.Effects)
+local Inventory = require(script.Inventory)
+local UI = require(script.UI)
 
 local player = Players.LocalPlayer
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
-local rollRemote = remotes:WaitForChild("Roll") :: RemoteFunction
-local getDataRemote = remotes:WaitForChild("GetData") :: RemoteFunction
-local announceRemote = remotes:WaitForChild("Announce") :: RemoteEvent
-
-local FONT = Enum.Font.FredokaOne
-local WHITE = Color3.new(1, 1, 1)
-
--- Liten hjälpfunktion för att skapa UI snabbt.
-local function new(className: string, props: { [string]: any }, children: { Instance }?): any
-	local instance = Instance.new(className)
-	for key, value in props do
-		if key ~= "Parent" then
-			(instance :: any)[key] = value
-		end
-	end
-	for _, child in children or {} do
-		child.Parent = instance
-	end
-	instance.Parent = props.Parent
-	return instance
+local function getRemote(name: string): any
+	return remotes:WaitForChild(name)
 end
+local rollRemote = getRemote("Roll") :: RemoteFunction
+local sellRemote = getRemote("Sell") :: RemoteFunction
+local sellCommonRemote = getRemote("SellCommon") :: RemoteFunction
+local potionRemote = getRemote("BuyPotion") :: RemoteFunction
+local equipRemote = getRemote("Equip") :: RemoteFunction
+local getStateRemote = getRemote("GetState") :: RemoteFunction
+local stateRemote = getRemote("State") :: RemoteEvent
+local announceRemote = getRemote("Announce") :: RemoteEvent
 
-local function corner(radius: number)
-	return new("UICorner", { CornerRadius = UDim.new(0, radius) })
-end
-
-local function stroke(thickness: number, color: Color3?)
-	return new("UIStroke", { Thickness = thickness, Color = color or Color3.new(0, 0, 0) })
-end
-
-local function label(props: { [string]: any }): TextLabel
-	props.BackgroundTransparency = props.BackgroundTransparency or 1
-	props.Font = props.Font or FONT
-	props.TextColor3 = props.TextColor3 or WHITE
-	props.TextScaled = true
-	return new("TextLabel", props, { stroke(2) })
-end
+local GREEN = Color3.fromRGB(120, 255, 120)
+local RED = Color3.fromRGB(255, 80, 80)
+local GOLD = Color3.fromRGB(255, 215, 60)
 
 ---------------------------------------------------------------------
 -- Gränssnittet
 ---------------------------------------------------------------------
 
-local gui = new("ScreenGui", {
+local playerGui = player:WaitForChild("PlayerGui")
+local gui = UI.new("ScreenGui", {
 	Name = "KycklingRNG",
 	ResetOnSpawn = false,
 	IgnoreGuiInset = true,
-	Parent = player:WaitForChild("PlayerGui"),
+	Parent = playerGui,
 })
+local effectsLayer = UI.new("ScreenGui", {
+	Name = "KycklingEffekter",
+	ResetOnSpawn = false,
+	IgnoreGuiInset = true,
+	DisplayOrder = 20,
+	Parent = playerGui,
+})
+Effects.init(effectsLayer)
 
--- Vit blixt när man får något ovanligt.
-local flash = new("Frame", {
+-- Allt som göms under cutscenen ligger i "hud".
+local hud = UI.new("Frame", {
 	Size = UDim2.fromScale(1, 1),
-	BackgroundColor3 = WHITE,
 	BackgroundTransparency = 1,
-	ZIndex = 10,
 	Parent = gui,
 })
 
--- Kycklingen som visas i mitten.
-local display = new("Frame", {
+-- Mynt uppe till vänster.
+local coinBox = UI.new("Frame", {
+	Position = UDim2.fromOffset(20, 70),
+	Size = UDim2.fromOffset(220, 54),
+	BackgroundColor3 = UI.DARK,
+	BackgroundTransparency = 0.2,
+	Parent = hud,
+}, { UI.corner(14), UI.stroke(3, GOLD, Enum.ApplyStrokeMode.Border) })
+local coinScale = UI.new("UIScale", { Parent = coinBox })
+local coinLabel = UI.label({
+	Position = UDim2.fromOffset(12, 8),
+	Size = UDim2.new(1, -24, 1, -16),
+	TextXAlignment = Enum.TextXAlignment.Left,
+	TextColor3 = GOLD,
+	Text = "🪙 0",
+	Parent = coinBox,
+})
+
+local potionButton = UI.button({
+	Position = UDim2.fromOffset(20, 132),
+	Size = UDim2.fromOffset(220, 44),
+	BackgroundColor3 = Color3.fromRGB(150, 70, 220),
+	Text = `🧪 Tur-dryck ({Config.POTION_COST} 🪙)`,
+	Parent = hud,
+})
+
+-- Kycklingen man fick senast (för de vanliga, utan cutscene).
+local display = UI.new("Frame", {
 	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, 1, -170),
-	Size = UDim2.fromOffset(300, 360),
+	Position = UDim2.new(0.5, 0, 1, -215),
+	Size = UDim2.fromOffset(240, 280),
 	BackgroundTransparency = 1,
-	Parent = gui,
+	Parent = hud,
 })
-
-local viewport = new("ViewportFrame", {
-	Size = UDim2.fromOffset(300, 260),
-	BackgroundColor3 = Color3.fromRGB(30, 30, 45),
+local displayScale = UI.new("UIScale", { Parent = display })
+local viewport = UI.viewport({
+	Size = UDim2.fromOffset(240, 200),
+	BackgroundColor3 = UI.DARK,
 	BackgroundTransparency = 0.3,
-	Ambient = Color3.fromRGB(170, 170, 170),
-	LightColor = WHITE,
-	LightDirection = Vector3.new(-1, -1, 1),
 	Parent = display,
-}, { corner(20) })
-local viewportStroke = stroke(4, WHITE)
+})
+UI.corner(20).Parent = viewport
+local viewportStroke = UI.stroke(4, UI.WHITE, Enum.ApplyStrokeMode.Border)
 viewportStroke.Parent = viewport
 
-local camera = new("Camera", {
-	FieldOfView = 40,
-	CFrame = CFrame.lookAt(Vector3.new(3.5, 3.5, -8), Vector3.new(0, 2, 0)),
-	Parent = viewport,
-})
-viewport.CurrentCamera = camera
-
-local nameLabel = label({
-	Position = UDim2.fromOffset(0, 265),
-	Size = UDim2.fromOffset(300, 45),
+local nameLabel = UI.label({
+	Position = UDim2.fromOffset(-30, 205),
+	Size = UDim2.fromOffset(300, 40),
 	Text = "Tryck på tärningen!",
 	Parent = display,
 })
-
-local infoLabel = label({
-	Position = UDim2.fromOffset(0, 312),
-	Size = UDim2.fromOffset(300, 30),
+local infoLabel = UI.label({
+	Position = UDim2.fromOffset(-30, 247),
+	Size = UDim2.fromOffset(300, 26),
 	Text = "",
 	Parent = display,
 })
 
 -- Tärningen längst ner i mitten.
-local diceButton = new("TextButton", {
+local dice = Dice.new({
 	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, 1, -25),
+	Position = UDim2.new(0.5, 0, 1, -30),
 	Size = UDim2.fromOffset(120, 120),
-	BackgroundColor3 = WHITE,
-	Text = "",
-	AutoButtonColor = true,
-	Parent = gui,
-}, { corner(24), stroke(4) })
-
--- Prickarna på tärningen (en femma).
-for _, dot in { { 0.25, 0.25 }, { 0.75, 0.25 }, { 0.5, 0.5 }, { 0.25, 0.75 }, { 0.75, 0.75 } } do
-	new("Frame", {
-		AnchorPoint = Vector2.new(0.5, 0.5),
-		Position = UDim2.fromScale(dot[1], dot[2]),
-		Size = UDim2.fromScale(0.17, 0.17),
-		BackgroundColor3 = Color3.fromRGB(30, 30, 30),
-		Parent = diceButton,
-	}, { corner(100) })
-end
-
-local luckLabel = label({
-	AnchorPoint = Vector2.new(0.5, 1),
-	Position = UDim2.new(0.5, 0, 1, -150),
-	Size = UDim2.fromOffset(300, 22),
-	Text = "",
-	Parent = gui,
+	Parent = hud,
 })
 
-local function sideButton(text: string, xOffset: number, color: Color3): TextButton
-	return new("TextButton", {
-		AnchorPoint = Vector2.new(0.5, 1),
-		Position = UDim2.new(0.5, xOffset, 1, -45),
-		Size = UDim2.fromOffset(130, 60),
-		BackgroundColor3 = color,
-		Font = FONT,
-		TextColor3 = WHITE,
-		TextScaled = true,
-		Text = text,
-		Parent = gui,
-	}, { corner(14), stroke(3), new("UIPadding", { PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8) }) })
-end
+local costLabel = UI.label({
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -155),
+	Size = UDim2.fromOffset(300, 24),
+	Text = `Kostar {Config.ROLL_COST} 🪙`,
+	TextColor3 = GOLD,
+	Parent = hud,
+})
+local luckLabel = UI.label({
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 0, 1, -180),
+	Size = UDim2.fromOffset(340, 24),
+	Text = "",
+	Parent = hud,
+})
 
-local autoButton = sideButton("Auto: AV", -150, Color3.fromRGB(200, 70, 70))
-local collectionButton = sideButton("Samling", 150, Color3.fromRGB(60, 140, 230))
+local autoButton = UI.button({
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, -160, 1, -50),
+	Size = UDim2.fromOffset(150, 64),
+	BackgroundColor3 = Color3.fromRGB(200, 70, 70),
+	Text = "Auto: AV",
+	Parent = hud,
+})
+local inventoryButton = UI.button({
+	AnchorPoint = Vector2.new(0.5, 1),
+	Position = UDim2.new(0.5, 160, 1, -50),
+	Size = UDim2.fromOffset(150, 64),
+	BackgroundColor3 = Color3.fromRGB(60, 140, 230),
+	Text = "🎒 Inventory",
+	Parent = hud,
+})
 
 -- Meddelanden högst upp, t.ex. när någon rullar något ovanligt.
-local banner = label({
+local banner = UI.label({
 	AnchorPoint = Vector2.new(0.5, 0),
 	Position = UDim2.new(0.5, 0, 0, 60),
 	Size = UDim2.fromOffset(700, 40),
@@ -168,80 +169,93 @@ local banner = label({
 local bannerStroke = banner:FindFirstChildOfClass("UIStroke") :: UIStroke
 bannerStroke.Transparency = 1
 
--- Samlingen: en lista över alla kycklingar.
-local collectionPanel = new("Frame", {
-	AnchorPoint = Vector2.new(1, 0.5),
-	Position = UDim2.new(1, -20, 0.5, 0),
-	Size = UDim2.fromOffset(340, 440),
-	BackgroundColor3 = Color3.fromRGB(30, 30, 45),
-	BackgroundTransparency = 0.1,
-	Visible = false,
-	Parent = gui,
-}, { corner(16), stroke(3) })
+---------------------------------------------------------------------
+-- Tillstånd från servern
+---------------------------------------------------------------------
 
-local collectionTitle = label({
-	Position = UDim2.fromOffset(0, 8),
-	Size = UDim2.new(1, 0, 0, 34),
-	Text = "Samling",
-	Parent = collectionPanel,
+local state = {
+	coins = 0,
+	rolls = 0,
+	owned = {},
+	discovered = {},
+	equipped = nil,
+}
+local potionEnds = 0
+local shownCoins = 0
+
+local function animateCoins(target: number)
+	local from = shownCoins
+	shownCoins = target
+	local counter = UI.new("NumberValue", { Value = from })
+	counter.Changed:Connect(function(value)
+		coinLabel.Text = `🪙 {Chickens.formatNumber(value)}`
+	end)
+	local t = TweenService:Create(counter, TweenInfo.new(0.4), { Value = target })
+	t.Completed:Connect(function()
+		coinLabel.Text = `🪙 {Chickens.formatNumber(target)}`
+		counter:Destroy()
+	end)
+	t:Play()
+	if target > from then
+		coinScale.Scale = 1.15
+		TweenService:Create(coinScale, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+	end
+end
+
+local function updateLuck()
+	local left = Config.LUCK_EVERY - (state.rolls % Config.LUCK_EVERY)
+	if left == 1 then
+		luckLabel.Text = `🍀 Nästa rullning: TUR x{Config.LUCK_MULTIPLIER}!`
+		luckLabel.TextColor3 = GREEN
+	else
+		luckLabel.Text = `🍀 Tur x{Config.LUCK_MULTIPLIER} om {left} rullningar`
+		luckLabel.TextColor3 = UI.WHITE
+	end
+end
+
+local function updateCost()
+	local free = state.coins < Config.ROLL_COST and next(state.owned) == nil
+	costLabel.Text = if free then "Gratis rullning!" else `Kostar {Config.ROLL_COST} 🪙`
+	costLabel.TextColor3 = if free then GREEN elseif state.coins < Config.ROLL_COST then RED else GOLD
+end
+
+local inventory = Inventory.new(gui, {
+	sell = function(id, amount, from)
+		local ok, earned = pcall(sellRemote.InvokeServer, sellRemote, id, amount)
+		if ok and earned and earned > 0 then
+			Effects.popup(`+{Chickens.formatNumber(earned)} 🪙`, GOLD, Effects.centerOf(from))
+			Effects.confetti(Effects.centerOf(from), 8, { GOLD, UI.WHITE }, 0.4)
+		end
+	end,
+	sellCommon = function(from)
+		local ok, earned = pcall(sellCommonRemote.InvokeServer, sellCommonRemote)
+		if ok and earned and earned > 0 then
+			Effects.popup(`+{Chickens.formatNumber(earned)} 🪙`, GOLD, Effects.centerOf(from))
+			Effects.confetti(Effects.centerOf(from), 20, { GOLD, UI.WHITE }, 0.6)
+		end
+	end,
+	equip = function(id)
+		pcall(equipRemote.InvokeServer, equipRemote, id)
+	end,
 })
 
-local list = new("ScrollingFrame", {
-	Position = UDim2.fromOffset(10, 50),
-	Size = UDim2.new(1, -20, 1, -60),
-	BackgroundTransparency = 1,
-	BorderSizePixel = 0,
-	ScrollBarThickness = 6,
-	AutomaticCanvasSize = Enum.AutomaticSize.Y,
-	CanvasSize = UDim2.new(),
-	Parent = collectionPanel,
-}, { new("UIListLayout", { Padding = UDim.new(0, 6), SortOrder = Enum.SortOrder.LayoutOrder }) })
-
-local rows: { [string]: { name: TextLabel, count: TextLabel } } = {}
-for index, chicken in Chickens.list do
-	local rarity = Chickens.rarityOf(chicken)
-	local row = new("Frame", {
-		LayoutOrder = index,
-		Size = UDim2.new(1, -8, 0, 44),
-		BackgroundColor3 = rarity.color,
-		BackgroundTransparency = 0.6,
-		Parent = list,
-	}, { corner(10) })
-	rows[chicken.id] = {
-		name = label({
-			Position = UDim2.fromOffset(8, 3),
-			Size = UDim2.new(0.62, -8, 0, 22),
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Text = "???",
-			Parent = row,
-		}),
-		count = label({
-			Position = UDim2.new(0.62, 0, 0, 3),
-			Size = UDim2.new(0.38, -8, 0, 22),
-			TextXAlignment = Enum.TextXAlignment.Right,
-			Text = "",
-			Parent = row,
-		}),
-	}
-	label({
-		Position = UDim2.fromOffset(8, 25),
-		Size = UDim2.new(1, -16, 0, 16),
-		TextXAlignment = Enum.TextXAlignment.Left,
-		TextColor3 = rarity.color,
-		Text = `{rarity.name} · {Chickens.formatOdds(chicken)}`,
-		Parent = row,
-	})
-end
+stateRemote.OnClientEvent:Connect(function(newState)
+	local oldCoins = state.coins
+	state = newState
+	potionEnds = os.clock() + newState.luckSeconds
+	if state.coins ~= oldCoins then
+		animateCoins(state.coins)
+	end
+	inventory.update(state)
+	updateLuck()
+	updateCost()
+end)
 
 ---------------------------------------------------------------------
 -- Visa kycklingar
 ---------------------------------------------------------------------
 
 local currentModel: Model? = nil
-local counts: { [string]: number } = {}
-local totalRolls = 0
-local luckEvery = 10
-local luckMultiplier = 2
 
 local function showChicken(chicken: Chickens.Chicken)
 	if currentModel then
@@ -255,45 +269,34 @@ local function showChicken(chicken: Chickens.Chicken)
 	viewportStroke.Color = rarity.color
 end
 
--- Kycklingen gungar lite, och regnbågskycklingar byter färg.
-RunService.RenderStepped:Connect(function()
-	local model = currentModel
-	if not model then
-		return
-	end
-	local t = os.clock()
-	model:PivotTo(CFrame.Angles(0, math.sin(t * 1.5) * 0.6, 0))
+local function animateRainbow(model: Instance, t: number)
 	for _, part in model:GetDescendants() do
 		if part:IsA("BasePart") and part:GetAttribute("Rainbow") then
 			part.Color = Color3.fromHSV((t * 0.3 + part.Position.Y * 0.1) % 1, 0.9, 1)
 		end
 	end
-end)
-
-local function updateCollection()
-	local found = 0
-	for _, chicken in Chickens.list do
-		local count = counts[chicken.id] or 0
-		local row = rows[chicken.id]
-		if count > 0 then
-			found += 1
-			row.name.Text = chicken.name
-			row.count.Text = `x{Chickens.formatNumber(count)}`
-		end
-	end
-	collectionTitle.Text = `Samling ({found}/{#Chickens.list})`
 end
 
-local function updateLuck()
-	local left = luckEvery - (totalRolls % luckEvery)
-	if left == 1 then
-		luckLabel.Text = `🍀 Nästa rullning: TUR x{luckMultiplier}!`
-		luckLabel.TextColor3 = Color3.fromRGB(120, 255, 120)
+local pets = workspace:WaitForChild("Kycklingar")
+RunService.RenderStepped:Connect(function()
+	local t = os.clock()
+	local model = currentModel
+	if model then
+		model:PivotTo(CFrame.Angles(0, math.sin(t * 1.5) * 0.6, 0))
+		animateRainbow(model, t)
+	end
+	animateRainbow(pets, t)
+
+	-- Tur-dryckens nedräkning
+	local potionLeft = potionEnds - t
+	if potionLeft > 0 then
+		potionButton.Text = `🧪 Tur x{Config.POTION_MULTIPLIER}: {math.ceil(potionLeft)} s`
+		potionButton.BackgroundColor3 = Color3.fromRGB(70, 190, 90)
 	else
-		luckLabel.Text = `🍀 Tur x{luckMultiplier} om {left} rullningar`
-		luckLabel.TextColor3 = WHITE
+		potionButton.Text = `🧪 Tur-dryck ({Config.POTION_COST} 🪙)`
+		potionButton.BackgroundColor3 = Color3.fromRGB(150, 70, 220)
 	end
-end
+end)
 
 local bannerToken = 0
 local function showBanner(text: string, color: Color3)
@@ -312,9 +315,15 @@ local function showBanner(text: string, color: Color3)
 	end)
 end
 
-local function flashScreen()
-	flash.BackgroundTransparency = 0.2
-	TweenService:Create(flash, TweenInfo.new(0.8), { BackgroundTransparency = 1 }):Play()
+-- Under cutscenen göms allt annat.
+local autoRoll = false
+Cutscene.onStart = function()
+	hud.Visible = false
+	inventory.frame.Visible = false
+	return true
+end
+Cutscene.onEnd = function()
+	hud.Visible = true
 end
 
 ---------------------------------------------------------------------
@@ -322,7 +331,12 @@ end
 ---------------------------------------------------------------------
 
 local rolling = false
-local autoRoll = false
+
+local function setAuto(on: boolean)
+	autoRoll = on
+	autoButton.Text = if on then "Auto: PÅ" else "Auto: AV"
+	autoButton.BackgroundColor3 = if on then Color3.fromRGB(70, 190, 90) else Color3.fromRGB(200, 70, 70)
+end
 
 local function roll()
 	if rolling then
@@ -335,58 +349,86 @@ local function roll()
 		rolling = false
 		return
 	end
-	local chicken = Chickens.byId[result.id]
-	local rare = chicken.odds >= 1000
+	if result.error then
+		Effects.popup(result.error, RED, Effects.centerOf(dice.button) - Vector2.new(0, 90))
+		dice.button.Rotation = 0
+		TweenService
+			:Create(dice.button, TweenInfo.new(0.05, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut, 5, true), {
+				Rotation = 10,
+			})
+			:Play()
+		setAuto(false)
+		task.wait(0.4)
+		rolling = false
+		return
+	end
 
-	-- Snurra igenom slumpade kycklingar, och sakta ner mot slutet.
-	-- Ovanliga kycklingar får en längre och spännande snurr.
-	infoLabel.Text = if result.lucky then "🍀 TUR-RULLNING!" else ""
-	infoLabel.TextColor3 = Color3.fromRGB(120, 255, 120)
-	local spins = if rare then 18 else 10
-	for i = 1, spins do
-		local teaser = Chickens.list[math.random(1, math.min(#Chickens.list, 12))]
-		showChicken(teaser)
-		task.wait(0.03 + (i / spins) ^ 3 * (if rare then 0.35 else 0.15))
+	local chicken = Chickens.byId[result.id]
+	local rarity = Chickens.rarityOf(chicken)
+	local tier = Chickens.tierOf(chicken)
+
+	if result.free then
+		Effects.popup("Gratis!", GREEN, Effects.centerOf(dice.button) - Vector2.new(0, 90))
+	else
+		Effects.popup(`-{Config.ROLL_COST} 🪙`, RED, Effects.centerOf(coinBox) + Vector2.new(60, 30))
+	end
+	if result.luck > 1 then
+		infoLabel.Text = `🍀 TUR x{result.luck}!`
+		infoLabel.TextColor3 = GREEN
+		Effects.ring(Effects.centerOf(dice.button), GREEN, 300, 0.5)
+	else
+		infoLabel.Text = ""
+	end
+
+	-- Tärningen snurrar medan kycklingar flimrar förbi.
+	local spinning = true
+	task.spawn(function()
+		while spinning do
+			showChicken(Chickens.list[math.random(1, 10)])
+			task.wait(0.07)
+		end
+	end)
+	dice:tumble(0.9)
+	spinning = false
+
+	if chicken.odds >= Config.CUTSCENE_ODDS then
+		Cutscene.play(chicken, result.isNew, autoRoll and tier <= 2)
 	end
 
 	showChicken(chicken)
-	local rarity = Chickens.rarityOf(chicken)
 	infoLabel.Text = `{rarity.name} · {Chickens.formatOdds(chicken)}`
 	infoLabel.TextColor3 = rarity.color
-
-	local isNew = (counts[chicken.id] or 0) == 0
-	counts[chicken.id] = result.count
-	totalRolls = result.rolls
-	updateCollection()
-	updateLuck()
-
-	if isNew then
+	displayScale.Scale = 1.2
+	TweenService:Create(displayScale, TweenInfo.new(0.3, Enum.EasingStyle.Back), { Scale = 1 }):Play()
+	if result.isNew then
 		nameLabel.Text = `NY! {chicken.name}`
-	end
-	if rare then
-		flashScreen()
+		Effects.confetti(Effects.centerOf(viewport), 25, { rarity.color, UI.WHITE, GOLD }, 0.6)
 	end
 
-	-- Tärningen studsar till.
-	diceButton.Rotation = 0
-	TweenService:Create(diceButton, TweenInfo.new(0.25, Enum.EasingStyle.Back), { Rotation = 360 }):Play()
-
-	task.wait(if rare then 1.5 else 0.3)
+	task.wait(0.25)
 	rolling = false
 end
 
-diceButton.Activated:Connect(function()
+dice.button.Activated:Connect(function()
 	task.spawn(roll)
 end)
 
 autoButton.Activated:Connect(function()
-	autoRoll = not autoRoll
-	autoButton.Text = if autoRoll then "Auto: PÅ" else "Auto: AV"
-	autoButton.BackgroundColor3 = if autoRoll then Color3.fromRGB(70, 190, 90) else Color3.fromRGB(200, 70, 70)
+	setAuto(not autoRoll)
 end)
 
-collectionButton.Activated:Connect(function()
-	collectionPanel.Visible = not collectionPanel.Visible
+inventoryButton.Activated:Connect(inventory.toggle)
+
+potionButton.Activated:Connect(function()
+	local ok, bought = pcall(potionRemote.InvokeServer, potionRemote)
+	local center = Effects.centerOf(potionButton)
+	if ok and bought then
+		Effects.confetti(center, 30, { Color3.fromRGB(150, 70, 220), GREEN, UI.WHITE }, 0.7)
+		Effects.ring(center, GREEN, 400, 0.6)
+		Effects.popup("Tur x2! 🍀", GREEN, center + Vector2.new(0, 50))
+	else
+		Effects.popup("Inte råd!", RED, center + Vector2.new(0, 50))
+	end
 end)
 
 announceRemote.OnClientEvent:Connect(function(playerName: string, chickenId: string)
@@ -395,17 +437,9 @@ announceRemote.OnClientEvent:Connect(function(playerName: string, chickenId: str
 	showBanner(`{playerName} rullade {chicken.name} ({Chickens.formatOdds(chicken)})!`, rarity.color)
 end)
 
--- Hämta sparad samling från servern.
+-- Be servern om vårt sparade tillstånd.
 task.spawn(function()
-	local ok, data = pcall(getDataRemote.InvokeServer, getDataRemote)
-	if ok and data then
-		counts = data.counts
-		totalRolls = data.rolls
-		luckEvery = data.luckEvery
-		luckMultiplier = data.luckMultiplier
-	end
-	updateCollection()
-	updateLuck()
+	pcall(getStateRemote.InvokeServer, getStateRemote)
 end)
 
 -- Auto-rullning

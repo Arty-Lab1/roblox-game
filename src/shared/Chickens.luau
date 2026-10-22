@@ -127,13 +127,23 @@ Chickens.rarities = {
 }
 
 function Chickens.rarityOf(chicken: Chicken)
-	local result = Chickens.rarities[1]
-	for _, rarity in Chickens.rarities do
+	return Chickens.rarities[Chickens.tierOf(chicken)]
+end
+
+-- Vilken nivå (1 = Vanlig ... 6 = Mytisk) en kyckling har.
+function Chickens.tierOf(chicken: Chicken): number
+	local tier = 1
+	for index, rarity in Chickens.rarities do
 		if chicken.odds >= rarity.minOdds then
-			result = rarity
+			tier = index
 		end
 	end
-	return result
+	return tier
+end
+
+-- Hur många mynt man får när man säljer en kyckling.
+function Chickens.valueOf(chicken: Chicken): number
+	return chicken.odds * 2
 end
 
 -- Slumpar en kyckling. Vi börjar med den ovanligaste och går nedåt.
