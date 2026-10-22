@@ -25,6 +25,7 @@ local sellCommonRemote = remote("RemoteFunction", "SellCommon")
 local potionRemote = remote("RemoteFunction", "BuyPotion")
 local equipRemote = remote("RemoteFunction", "Equip")
 local getStateRemote = remote("RemoteFunction", "GetState")
+local settingsRemote = remote("RemoteFunction", "SaveSetting")
 local stateRemote = remote("RemoteEvent", "State")
 local announceRemote = remote("RemoteEvent", "Announce")
 remotes.Parent = ReplicatedStorage
@@ -49,6 +50,7 @@ type PlayerData = {
 	equipped: string?,
 	luckUntil: number,
 	pet: Model?,
+	settings: { [string]: any },
 }
 local playerData: { [Player]: PlayerData } = {}
 local lastRoll: { [Player]: number } = {}
@@ -71,6 +73,7 @@ local function sendState(player: Player)
 		discovered = data.discovered,
 		equipped = data.equipped,
 		luckSeconds = math.max(0, data.luckUntil - os.clock()),
+		settings = data.settings,
 	})
 end
 
@@ -112,6 +115,7 @@ local function onPlayerAdded(player: Player)
 		owned = {},
 		discovered = {},
 		luckUntil = 0,
+		settings = table.clone(Config.DEFAULT_SETTINGS),
 	}
 	if store then
 		local ok, saved = pcall(store.GetAsync, store, tostring(player.UserId))
@@ -124,6 +128,11 @@ local function onPlayerAdded(player: Player)
 				data.discovered[id] = true
 			end
 			data.equipped = saved.equipped
+			for key, value in saved.settings or {} do
+				if type(Config.DEFAULT_SETTINGS[key]) == type(value) then
+					data.settings[key] = value
+				end
+			end
 		end
 	end
 	playerData[player] = data
@@ -144,6 +153,7 @@ local function save(player: Player)
 			owned = data.owned,
 			discovered = data.discovered,
 			equipped = data.equipped,
+			settings = data.settings,
 		})
 	end
 end
@@ -213,9 +223,31 @@ rollRemote.OnServerInvoke = function(player: Player)
 	if chicken.odds >= Config.ANNOUNCE_ODDS then
 		announceRemote:FireAllClients(player.DisplayName, chicken.id)
 	end
+
+	-- Auto-sälj: Vanliga kycklingar blir mynt direkt (utom första gången och den utrustade).
+	local sold = 0
+	if data.settings.autoSell and Chickens.tierOf(chicken) == 1 and not isNew and data.equipped ~= chicken.id then
+		sold = sell(player, chicken.id, 1)
+	end
 	sendState(player)
 
-	return { id = chicken.id, isNew = isNew, lucky = lucky, luck = luck, free = free }
+	return { id = chicken.id, isNew = isNew, lucky = lucky, luck = luck, free = free, sold = sold }
+end
+
+settingsRemote.OnServerInvoke = function(player: Player, key: unknown, value: unknown)
+	local data = playerData[player]
+	if not data or type(key) ~= "string" then
+		return false
+	end
+	local default = Config.DEFAULT_SETTINGS[key]
+	if default == nil or type(value) ~= type(default) then
+		return false
+	end
+	if type(value) == "number" and (value ~= value or value < 1 or value > 7) then
+		return false
+	end
+	data.settings[key] = value
+	return true
 end
 
 sellRemote.OnServerInvoke = function(player: Player, id: unknown, amount: unknown)

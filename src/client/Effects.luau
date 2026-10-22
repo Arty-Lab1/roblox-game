@@ -8,6 +8,10 @@ local Effects = {}
 
 local layer: ScreenGui -- konfetti och text hamnar här, ovanför allt annat
 
+-- Kan stängas av i inställningarna.
+Effects.shakeEnabled = true
+Effects.confettiEnabled = true
+
 function Effects.init(screen: ScreenGui)
 	layer = screen
 end
@@ -28,6 +32,9 @@ local particles: { Particle } = {}
 
 -- Skjuter ut konfetti från en punkt på skärmen (i pixlar).
 function Effects.confetti(origin: Vector2, count: number, colors: { Color3 }, power: number?)
+	if not Effects.confettiEnabled then
+		return
+	end
 	local strength = power or 1
 	for _ = 1, count do
 		local angle = math.random() * math.pi * 2
@@ -81,6 +88,9 @@ local shakeUntil = 0
 local shakeTargets: { [GuiObject]: UDim2 } = {}
 
 function Effects.shake(power: number, duration: number)
+	if not Effects.shakeEnabled then
+		return
+	end
 	shakePower = math.max(shakePower, power)
 	shakeUntil = math.max(shakeUntil, os.clock() + duration)
 end

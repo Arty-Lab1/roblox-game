@@ -11,6 +11,16 @@ return {
 	POTION_MULTIPLIER = 2,
 	POTION_SECONDS = 60,
 
-	CUTSCENE_ODDS = 10, -- cutscene för 1 på 10 eller ovanligare
 	ANNOUNCE_ODDS = 1000, -- alla på servern ser när någon får 1 på 1000 eller ovanligare
+
+	-- Inställningar spelaren kan ändra i menyn, och vad de är från början.
+	DEFAULT_SETTINGS = {
+		cutsceneTier = 2, -- cutscene från den här nivån (2 = Ovanlig), 7 = aldrig
+		shake = true,
+		confetti = true,
+		fastRoll = false,
+		autoSell = false, -- sälj Vanliga kycklingar direkt
+		showPets = true, -- visa andra spelares kycklingar
+		hideBanner = false,
+	},
 }

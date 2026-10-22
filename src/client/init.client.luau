@@ -11,6 +11,7 @@ local Cutscene = require(script.Cutscene)
 local Dice = require(script.Dice)
 local Effects = require(script.Effects)
 local Inventory = require(script.Inventory)
+local Settings = require(script.Settings)
 local UI = require(script.UI)
 
 local player = Players.LocalPlayer
@@ -24,6 +25,7 @@ local sellCommonRemote = getRemote("SellCommon") :: RemoteFunction
 local potionRemote = getRemote("BuyPotion") :: RemoteFunction
 local equipRemote = getRemote("Equip") :: RemoteFunction
 local getStateRemote = getRemote("GetState") :: RemoteFunction
+local settingsRemote = getRemote("SaveSetting") :: RemoteFunction
 local stateRemote = getRemote("State") :: RemoteEvent
 local announceRemote = getRemote("Announce") :: RemoteEvent
 
@@ -81,6 +83,14 @@ local potionButton = UI.button({
 	Size = UDim2.fromOffset(220, 44),
 	BackgroundColor3 = Color3.fromRGB(150, 70, 220),
 	Text = `🧪 Tur-dryck ({Config.POTION_COST} 🪙)`,
+	Parent = hud,
+})
+
+local settingsButton = UI.button({
+	Position = UDim2.fromOffset(20, 184),
+	Size = UDim2.fromOffset(220, 44),
+	BackgroundColor3 = Color3.fromRGB(90, 90, 110),
+	Text = "⚙️ Inställningar",
 	Parent = hud,
 })
 
@@ -239,7 +249,29 @@ local inventory = Inventory.new(gui, {
 	end,
 })
 
+-- Inställningar: ändras direkt här och sparas på servern.
+local function applySetting(key: string, value: any)
+	if key == "shake" then
+		Effects.shakeEnabled = value
+	elseif key == "confetti" then
+		Effects.confettiEnabled = value
+	end
+end
+
+local settings = Settings.new(gui, function(key, value)
+	applySetting(key, value)
+	task.spawn(pcall, settingsRemote.InvokeServer, settingsRemote, key, value)
+end)
+
+local settingsLoaded = false
 stateRemote.OnClientEvent:Connect(function(newState)
+	if not settingsLoaded and newState.settings then
+		settingsLoaded = true
+		settings.load(newState.settings)
+		for key, value in newState.settings do
+			applySetting(key, value)
+		end
+	end
 	local oldCoins = state.coins
 	state = newState
 	potionEnds = os.clock() + newState.luckSeconds
@@ -287,6 +319,16 @@ RunService.RenderStepped:Connect(function()
 	end
 	animateRainbow(pets, t)
 
+	-- Göm andra spelares kycklingar om man valt det i inställningarna.
+	for _, pet in pets:GetChildren() do
+		local hidden = pet.Name ~= player.Name and not settings.values.showPets
+		for _, part in pet:GetDescendants() do
+			if part:IsA("BasePart") then
+				part.LocalTransparencyModifier = if hidden then 1 else 0
+			end
+		end
+	end
+
 	-- Tur-dryckens nedräkning
 	local potionLeft = potionEnds - t
 	if potionLeft > 0 then
@@ -300,6 +342,9 @@ end)
 
 local bannerToken = 0
 local function showBanner(text: string, color: Color3)
+	if settings.values.hideBanner then
+		return
+	end
 	bannerToken += 1
 	local token = bannerToken
 	banner.Text = text
@@ -320,6 +365,7 @@ local autoRoll = false
 Cutscene.onStart = function()
 	hud.Visible = false
 	inventory.frame.Visible = false
+	settings.frame.Visible = false
 	return true
 end
 Cutscene.onEnd = function()
@@ -388,11 +434,14 @@ local function roll()
 			task.wait(0.07)
 		end
 	end)
-	dice:tumble(0.9)
+	dice:tumble(if settings.values.fastRoll then 0.35 else 0.9)
 	spinning = false
 
-	if chicken.odds >= Config.CUTSCENE_ODDS then
+	if tier >= settings.values.cutsceneTier then
 		Cutscene.play(chicken, result.isNew, autoRoll and tier <= 2)
+	end
+	if result.sold > 0 then
+		Effects.popup(`Såld: +{result.sold} 🪙`, GOLD, Effects.centerOf(coinBox) + Vector2.new(60, 30))
 	end
 
 	showChicken(chicken)
@@ -417,7 +466,15 @@ autoButton.Activated:Connect(function()
 	setAuto(not autoRoll)
 end)
 
-inventoryButton.Activated:Connect(inventory.toggle)
+-- Bara en meny öppen åt gången.
+inventoryButton.Activated:Connect(function()
+	settings.frame.Visible = false
+	inventory.toggle()
+end)
+settingsButton.Activated:Connect(function()
+	inventory.frame.Visible = false
+	settings.toggle()
+end)
 
 potionButton.Activated:Connect(function()
 	local ok, bought = pcall(potionRemote.InvokeServer, potionRemote)
